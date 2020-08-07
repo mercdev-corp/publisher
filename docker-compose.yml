@@ -1,0 +1,139 @@
+version: '2.1'
+
+services:
+  postgres:
+    image: "postgres:latest"
+    container_name: publisher-postgres
+    hostname: publisher-postgres
+    environment:
+      POSTGRES_PASSWORD: publisher-postgres
+      POSTGRES_USER: publisher-postgres
+    ports:
+      - 5432:5432
+    volumes:
+      - ../volumes/postgres:/var/lib/postgresql
+
+  rabbitmq:
+    image: "rabbitmq:management"
+    container_name: publisher-rabbitmq
+    hostname: publisher-rabbitmq
+    ports:
+      - 5672:5672
+      - 15672:15672
+    volumes:
+      - ../volumes/rabbitmq:/var/lib/rabbitmq
+
+  autotests:
+    image: "python:3.8-buster"
+    container_name: publisher-django-test
+    hostname: publisher-django-test
+    command: /entrypoint.sh test
+    environment:
+      DJANGO_TESTING: 1
+      DOCKER_CONTAINER: 1
+      RABBIT_HOST: publisher-rabbitmq
+      POSTGRES_HOST: publisher-postgres
+      POSTGRES_PASSWORD: publisher-postgres
+      POSTGRES_USER: publisher-postgres
+    depends_on:
+      rabbitmq:
+        condition: service_started
+      postgres:
+        condition: service_started
+    volumes:
+      - ./entrypoint.sh:/entrypoint.sh
+      - ../volumes/env:/publisher/env
+      - ../volumes/media:/publisher/media
+      - ./:/publisher/publisher
+
+  celery:
+    image: "python:3.8-buster"
+    container_name: publisher-celery
+    hostname: publisher-celery
+    command: /entrypoint.sh celery
+    environment:
+      DOCKER_CONTAINER: 1
+      RABBIT_HOST: publisher-rabbitmq
+      POSTGRES_HOST: publisher-postgres
+      POSTGRES_PASSWORD: publisher-postgres
+      POSTGRES_USER: publisher-postgres
+    depends_on:
+      rabbitmq:
+        condition: service_started
+      postgres:
+        condition: service_started
+    volumes:
+      - ./entrypoint.sh:/entrypoint.sh
+      - ../volumes/env:/publisher/env
+      - ../volumes/media:/publisher/media
+      - ./:/publisher/publisher
+
+  runserver:
+    image: "python:3.8-buster"
+    container_name: publisher-django
+    hostname: publisher-django
+    command: /entrypoint.sh runserver
+    environment:
+      DOCKER_CONTAINER: 1
+      RABBIT_HOST: publisher-rabbitmq
+      POSTGRES_HOST: publisher-postgres
+      POSTGRES_PASSWORD: publisher-postgres
+      POSTGRES_USER: publisher-postgres
+      ADMIN_USERNAME: 'admin'
+      ADMIN_PASSWORD: 'adMIN1234'
+    depends_on:
+      rabbitmq:
+        condition: service_started
+      postgres:
+        condition: service_started
+      celery:
+        condition: service_started
+    ports:
+      - 0.0.0.0:8000:8000
+    volumes:
+      - ./entrypoint.sh:/entrypoint.sh
+      - ../volumes/env:/publisher/env
+      - ../volumes/media:/publisher/media
+      - ./:/publisher/publisher
+
+  daphne:
+    image: "python:3.8-buster"
+    container_name: publisher-daphne
+    hostname: publisher-daphne
+    command: /entrypoint.sh
+    environment:
+      DOCKER_CONTAINER: 1
+      RABBIT_HOST: publisher-rabbitmq
+      POSTGRES_HOST: publisher-postgres
+      POSTGRES_PASSWORD: publisher-postgres
+      POSTGRES_USER: publisher-postgres
+      ADMIN_USERNAME: 'admin'
+      ADMIN_PASSWORD: 'adMIN1234'
+    depends_on:
+      rabbitmq:
+        condition: service_started
+      postgres:
+        condition: service_started
+      celery:
+        condition: service_started
+    ports:
+      - 8080:8080
+    volumes:
+      - ./entrypoint.sh:/entrypoint.sh
+      - ../volumes/env:/publisher/env
+      - ../volumes/media:/publisher/media
+      - ./:/publisher/publisher
+
+  web:
+    image: nginx
+    container_name: publisher-nginx
+    hostname: publisher-nginx
+    depends_on:
+      daphne:
+        condition: service_started
+    ports:
+      - 0.0.0.0:80:80
+    volumes:
+      - ./docker/nginx/default.conf:/etc/nginx/conf.d/default.conf
+      - ../volumes/media:/publisher:ro
+      - ../volumes/nginx:/etc/nginx/conf.d
